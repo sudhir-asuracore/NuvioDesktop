@@ -229,10 +229,15 @@ fun NuvioTheme(
     val tokens = defaultNuvioThemeTokens(palette, amoled = amoled, colorScheme = colorScheme)
 
     val density = LocalDensity.current
-    val effectiveDesktopUiScale = if (isDesktop) {
-        desktopUiScale.coerceIn(NuvioDesktopMinUiScale, NuvioDesktopMaxUiScale)
-    } else {
-        NuvioDesktopMinUiScale
+    val customScale = if (isDesktop) {
+        System.getProperty("nuvio.ui.scale")?.toFloatOrNull()
+            ?: System.getenv("NUVIO_UI_SCALE")?.toFloatOrNull()
+    } else null
+
+    val effectiveDesktopUiScale = when {
+        customScale != null -> customScale
+        isDesktop -> desktopUiScale.coerceIn(NuvioDesktopMinUiScale, NuvioDesktopMaxUiScale)
+        else -> NuvioDesktopMinUiScale
     }
     CompositionLocalProvider(
         LocalNuvioPlatformDensity provides density,
