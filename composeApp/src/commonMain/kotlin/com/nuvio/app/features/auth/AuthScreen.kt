@@ -582,7 +582,8 @@ private fun AuthLargeLayout(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = formHorizontalPadding),
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = formHorizontalPadding, vertical = 24.dp),
             ) {
                 AuthHeading(
                     isSignUp = isSignUp,
