@@ -1,0 +1,148 @@
+name: Build & Publish Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_format:
+        description: 'Package format to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - deb
+          - tar.gz
+  push:
+    branches:
+      - omarchy-fixes
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - '.github/workflows/close-*.yml'
+      - '.github/workflows/stale-*.yml'
+      - '.github/workflows/triage-*.yml'
+      - '.github/workflows/upstream-sync.yml'
+
+permissions:
+  contents: read
+  actions: write # Required for pruning older artifacts via GitHub API
+
+concurrency:
+  group: build-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Linux Desktop Package
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PACKAGE_FORMAT: ${{ inputs.package_format || 'all' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          bash ./scripts/linux/install-desktop-build-dependencies.sh fakeroot dpkg-dev
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Configure runtime properties
+        run: |
+          if [ -n "${{ secrets.NUVIO_DESKTOP_LOCAL_PROPERTIES_BASE64 }}" ]; then
+            echo "${{ secrets.NUVIO_DESKTOP_LOCAL_PROPERTIES_BASE64 }}" | base64 --decode > local.properties
+          else
+            cat << 'EOF' > local.properties
+          NUVIO_SUPABASE_URL=https://api.nuvio.tv
+          NUVIO_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgxNTIxMzQ2LCJleHAiOjE5MzkyMDEzNDZ9.tmQaj682pwzehpqlgCDMnySOqiUvpgRbrE43T4VJpDI
+          NUVIO_SUPABASE_FALLBACK_URL=https://api-two.nuvioapp.space
+          EOF
+          fi
+
+      - name: Build Desktop Distribution
+        run: |
+          set -euo pipefail
+          ./gradlew :composeApp:createReleaseDistributable \
+            -Pcompose.desktop.packaging.checkJdkVendor=false \
+            --no-configuration-cache \
+            --no-daemon \
+            --stacktrace
+
+      - name: Build DEB Package
+        if: env.PACKAGE_FORMAT == 'all' || env.PACKAGE_FORMAT == 'deb'
+        run: |
+          set -euo pipefail
+          ./gradlew :composeApp:packageReleaseDeb \
+            -Pcompose.desktop.packaging.checkJdkVendor=false \
+            --no-configuration-cache \
+            --no-daemon \
+            --stacktrace
+
+          deb_dir="${GITHUB_WORKSPACE}/composeApp/build/compose/binaries/main-release/deb"
+          mapfile -t debs < <(find "${deb_dir}" -maxdepth 1 -type f -name '*.deb' 2>/dev/null | sort)
+          if [ "${#debs[@]}" -gt 0 ]; then
+            bash ./scripts/linux/patch-linux-deb.sh "${debs[0]}" || true
+          fi
+
+      - name: Assemble Artifacts
+        run: |
+          mkdir -p artifacts
+          version="$(grep '^VERSION_NAME=' composeApp/Configuration/DesktopVersion.properties 2>/dev/null | cut -d'=' -f2 || echo 'latest')"
+
+          # Archive standalone distributable bundle
+          if [ "${PACKAGE_FORMAT}" = "all" ] || [ "${PACKAGE_FORMAT}" = "tar.gz" ]; then
+            app_dir="${GITHUB_WORKSPACE}/composeApp/build/compose/binaries/main-release/app/Nuvio"
+            if [ -d "${app_dir}" ]; then
+              tar -czf "artifacts/Nuvio-Linux-x86_64-${version}.tar.gz" -C "$(dirname "${app_dir}")" Nuvio
+            fi
+          fi
+
+          # Collect deb package
+          if [ "${PACKAGE_FORMAT}" = "all" ] || [ "${PACKAGE_FORMAT}" = "deb" ]; then
+            deb_dir="${GITHUB_WORKSPACE}/composeApp/build/compose/binaries/main-release/deb"
+            mapfile -t debs < <(find "${deb_dir}" -maxdepth 1 -type f -name '*.deb' 2>/dev/null | sort)
+            for deb in "${debs[@]}"; do
+              cp "${deb}" "artifacts/Nuvio-Linux-x86_64-${version}.deb"
+            done
+          fi
+
+          echo "Generated artifacts:"
+          ls -lh artifacts/
+
+      - name: Upload Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuvio-desktop-linux-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Prune Older Artifacts (Retain max 2)
+        if: always()
+        run: |
+          echo "Checking existing artifacts to maintain a maximum of 2..."
+          
+          # Fetch artifacts list sorted by creation date descending
+          artifacts_json=$(gh api "repos/${{ github.repository }}/actions/artifacts" --paginate --jq '.artifacts | sort_by(.created_at) | reverse' || echo '[]')
+          
+          # Extract artifact IDs older than the newest 2
+          old_ids=$(echo "${artifacts_json}" | jq -r '.[2:] | .[].id // empty')
+          
+          if [ -z "${old_ids}" ]; then
+            echo "Total artifacts count is within the limit (<= 2). No deletion needed."
+          else
+            for id in ${old_ids}; do
+              echo "Pruning older artifact ID: ${id}"
+              gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/${id}" || true
+            done
+            echo "Pruning complete. Kept the 2 most recent artifacts."
+          fi

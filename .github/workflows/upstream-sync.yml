@@ -1,0 +1,113 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    # Runs at 00:00 UTC every Sunday
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      upstream_branch:
+        description: 'Upstream branch to check and sync from'
+        required: true
+        default: 'Dev'
+        type: string
+      target_branch:
+        description: 'Target branch in this repository to merge into'
+        required: true
+        default: 'omarchy-fixes'
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-and-sync:
+    name: Check & Sync Upstream
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      UPSTREAM_BRANCH: ${{ inputs.upstream_branch || 'Dev' }}
+      TARGET_BRANCH: ${{ inputs.target_branch || 'omarchy-fixes' }}
+      UPSTREAM_REPO: 'https://github.com/NuvioMedia/NuvioDesktop.git'
+
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch || 'omarchy-fixes' }}
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream and inspect changes
+        id: check_upstream
+        run: |
+          git remote add upstream "${UPSTREAM_REPO}" || git remote set-url upstream "${UPSTREAM_REPO}"
+          git fetch upstream "${UPSTREAM_BRANCH}"
+
+          NEW_COMMITS_COUNT=$(git rev-list --count "${TARGET_BRANCH}..upstream/${UPSTREAM_BRANCH}")
+          echo "Found ${NEW_COMMITS_COUNT} new commit(s) in upstream/${UPSTREAM_BRANCH}."
+          echo "count=${NEW_COMMITS_COUNT}" >> "$GITHUB_OUTPUT"
+
+          if [ "${NEW_COMMITS_COUNT}" -gt 0 ]; then
+            git log --oneline -n 25 "${TARGET_BRANCH}..upstream/${UPSTREAM_BRANCH}" > commit_summary.txt
+          fi
+
+      - name: Create Sync Branch and Open Pull Request
+        if: steps.check_upstream.outputs.count > 0
+        run: |
+          SYNC_BRANCH="sync/upstream-${UPSTREAM_BRANCH}-into-${TARGET_BRANCH}"
+          
+          # Branch from target_branch
+          git checkout -B "${SYNC_BRANCH}" "${TARGET_BRANCH}"
+
+          # Merge upstream changes
+          if ! git merge "upstream/${UPSTREAM_BRANCH}" -m "chore(sync): merge upstream/${UPSTREAM_BRANCH} into ${TARGET_BRANCH}"; then
+            echo "::error::Merge conflict detected between upstream/${UPSTREAM_BRANCH} and ${TARGET_BRANCH}. Manual resolution required."
+            git merge --abort || true
+            exit 1
+          fi
+
+          # Push sync branch to origin repository
+          git push origin "${SYNC_BRANCH}" --force
+
+          # Check if an existing open PR exists for this sync branch
+          EXISTING_PR=$(gh pr list --head "${SYNC_BRANCH}" --base "${TARGET_BRANCH}" --state open --json number --jq '.[0].number')
+          
+          COMMIT_LOG=$(cat commit_summary.txt)
+          PR_TITLE="chore(sync): merge upstream ${UPSTREAM_BRANCH} changes into ${TARGET_BRANCH}"
+          PR_BODY=$(cat <<EOF
+          ### Automated Upstream Sync
+          
+          This automated pull request incorporates **${{ steps.check_upstream.outputs.count }}** new commit(s) from \`${UPSTREAM_REPO}\` (\`${UPSTREAM_BRANCH}\`) into \`${TARGET_BRANCH}\`.
+          
+          #### Recent Upstream Commits:
+          \`\`\`text
+          ${COMMIT_LOG}
+          \`\`\`
+          
+          ---
+          *Review the changes and merge when ready.*
+          EOF
+          )
+
+          if [ -n "${EXISTING_PR}" ]; then
+            echo "Updating existing PR #${EXISTING_PR}..."
+            gh pr edit "${EXISTING_PR}" --title "${PR_TITLE}" --body "${PR_BODY}"
+          else
+            echo "Creating new PR targeting ${TARGET_BRANCH}..."
+            gh pr create \
+              --base "${TARGET_BRANCH}" \
+              --head "${SYNC_BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body "${PR_BODY}"
+          fi
+
+      - name: Already Up to Date
+        if: steps.check_upstream.outputs.count == 0
+        run: |
+          echo "Branch '${TARGET_BRANCH}' is already up-to-date with upstream/${UPSTREAM_BRANCH}."
