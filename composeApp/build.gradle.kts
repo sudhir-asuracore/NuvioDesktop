@@ -1597,14 +1597,16 @@ if (isLinuxHost) {
                 val effectiveLinuxAppRelease = linuxAppRelease.orNull ?: "1"
                 val artifactPrefix =
                     "${effectiveLinuxPackageName}_${packageVersion.get()}-${effectiveLinuxAppRelease}_"
+                val artifactPrefixAlt =
+                    "${effectiveLinuxPackageName}_${packageVersion.get()}_"
                 val debs = destinationDir.get().asFile
                     .listFiles { file ->
-                        file.isFile && file.name.startsWith(artifactPrefix) && file.extension == "deb"
+                        file.isFile && (file.name.startsWith(artifactPrefix) || file.name.startsWith(artifactPrefixAlt)) && file.extension == "deb"
                     }
                     ?.sortedBy { it.name }
                     .orEmpty()
                 require(debs.size == 1) {
-                    "Expected exactly one current Linux DEB matching $artifactPrefix in " +
+                    "Expected exactly one current Linux DEB matching $artifactPrefix or $artifactPrefixAlt in " +
                         "${destinationDir.get().asFile.absolutePath}, found ${debs.size}."
                 }
                 val deb = debs.single()
@@ -1623,14 +1625,16 @@ if (isLinuxHost) {
                 val effectiveLinuxAppRelease = linuxAppRelease.orNull ?: "1"
                 val artifactPrefix =
                     "${effectiveLinuxPackageName}-${packageVersion.get()}-${effectiveLinuxAppRelease}."
+                val artifactPrefixAlt =
+                    "${effectiveLinuxPackageName}-${packageVersion.get()}."
                 val rpms = destinationDir.get().asFile
                     .listFiles { file ->
-                        file.isFile && file.name.startsWith(artifactPrefix) && file.extension == "rpm"
+                        file.isFile && (file.name.startsWith(artifactPrefix) || file.name.startsWith(artifactPrefixAlt)) && file.extension == "rpm"
                     }
                     ?.sortedBy { it.name }
                     .orEmpty()
                 require(rpms.size == 1) {
-                    "Expected exactly one current Linux RPM matching $artifactPrefix in " +
+                    "Expected exactly one current Linux RPM matching $artifactPrefix or $artifactPrefixAlt in " +
                         "${destinationDir.get().asFile.absolutePath}, found ${rpms.size}."
                 }
                 val rpm = rpms.single()
