@@ -20,7 +20,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  workflows: write
 
 jobs:
   check-and-sync:
@@ -66,12 +65,21 @@ jobs:
           # Branch from target_branch
           git checkout -B "${SYNC_BRANCH}" "${TARGET_BRANCH}"
 
-          # Merge upstream changes
-          if ! git merge "upstream/${UPSTREAM_BRANCH}" -m "chore(sync): merge upstream/${UPSTREAM_BRANCH} into ${TARGET_BRANCH}"; then
-            echo "::error::Merge conflict detected between upstream/${UPSTREAM_BRANCH} and ${TARGET_BRANCH}. Manual resolution required."
+          # Merge upstream changes without committing immediately
+          git merge "upstream/${UPSTREAM_BRANCH}" --no-commit --no-ff || true
+
+          # Preserve fork's workflows to avoid GITHUB_TOKEN workflow push restrictions
+          git checkout "${TARGET_BRANCH}" -- .github/workflows/
+
+          # Check for unresolved merge conflicts outside .github/workflows
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "::error::Unresolved merge conflicts detected outside .github/workflows. Manual resolution required."
             git merge --abort || true
             exit 1
           fi
+
+          # Finalize merge commit
+          git commit -m "chore(sync): merge upstream/${UPSTREAM_BRANCH} into ${TARGET_BRANCH}"
 
           # Push sync branch to origin repository
           git push origin "${SYNC_BRANCH}" --force
