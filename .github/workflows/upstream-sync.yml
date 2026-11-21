@@ -109,11 +109,15 @@ jobs:
             gh pr edit "${EXISTING_PR}" --title "${PR_TITLE}" --body "${PR_BODY}"
           else
             echo "Creating new PR targeting ${TARGET_BRANCH}..."
-            gh pr create \
+            if ! gh pr create \
               --base "${TARGET_BRANCH}" \
               --head "${SYNC_BRANCH}" \
               --title "${PR_TITLE}" \
-              --body "${PR_BODY}"
+              --body "${PR_BODY}"; then
+              echo "::warning::Could not create PR automatically via GITHUB_TOKEN."
+              echo "To allow GitHub Actions to create PRs automatically: Go to Repo Settings -> Actions -> General -> Workflow permissions -> check 'Allow GitHub Actions to create and approve pull requests'."
+              echo "The sync branch was successfully pushed! You can open the PR manually here: https://github.com/${GITHUB_REPOSITORY}/pull/new/${SYNC_BRANCH}"
+            fi
           fi
 
       - name: Already Up to Date
