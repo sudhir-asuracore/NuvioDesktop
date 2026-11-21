@@ -341,6 +341,9 @@ internal fun linuxInstallerCommand(
     if (method == LinuxInstallMethod.APP_IMAGE && !appImagePath.isNullOrBlank()) {
         return listOf("sh", "-c", appImageReplaceScript(updateFile.absolutePath, appImagePath, currentPid))
     }
+    if (method == LinuxInstallMethod.UNKNOWN) {
+        return listOf("xdg-open", "https://github.com/sudhir-asuracore/NuvioDesktop/releases")
+    }
 
     return listOf("xdg-open", updateFile.absolutePath)
 }

@@ -73,6 +73,14 @@ internal object VersionUtils {
     fun isRemoteNewer(remote: String?, local: String?): Boolean {
         val remoteVersion = parse(remote) ?: return false
         val localVersion = parse(local) ?: return false
+        if (remoteVersion.major == localVersion.major &&
+            remoteVersion.minor == localVersion.minor &&
+            remoteVersion.patch == localVersion.patch &&
+            localVersion.prerelease.any { it.contains("alpha", ignoreCase = true) } &&
+            remoteVersion.prerelease.isEmpty()
+        ) {
+            return false
+        }
         return remoteVersion > localVersion
     }
 

@@ -46,4 +46,20 @@ class VersionUtilsTest {
     fun `current beta naming is recognized as prerelease`() {
         assertTrue(VersionUtils.isPrerelease("0.8.12-beta"))
     }
+
+    @Test
+    fun `matching base release with alpha tag is not considered newer than local`() {
+        assertFalse(VersionUtils.isRemoteNewer("0.1.38", "0.1.38-alpha"))
+        assertFalse(VersionUtils.isRemoteNewer("0.1.38-alpha", "0.1.38-alpha"))
+        assertFalse(VersionUtils.isRemoteNewerLegacy("0.1.38", "0.1.38-alpha"))
+        assertFalse(VersionUtils.isRemoteNewerLegacy("0.1.38-alpha", "0.1.38-alpha"))
+    }
+
+    @Test
+    fun `newer upstream patch or minor is considered newer than local alpha`() {
+        assertTrue(VersionUtils.isRemoteNewer("0.1.39", "0.1.38-alpha"))
+        assertTrue(VersionUtils.isRemoteNewer("0.1.39-alpha", "0.1.38-alpha"))
+        assertTrue(VersionUtils.isRemoteNewerLegacy("0.1.39", "0.1.38-alpha"))
+        assertTrue(VersionUtils.isRemoteNewerLegacy("0.1.39-alpha", "0.1.38-alpha"))
+    }
 }

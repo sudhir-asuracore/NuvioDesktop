@@ -24,7 +24,7 @@ on:
       - '.github/workflows/upstream-sync.yml'
 
 permissions:
-  contents: read
+  contents: write # Required for publishing GitHub Releases
   actions: write # Required for pruning older artifacts via GitHub API
 
 concurrency:
@@ -119,6 +119,30 @@ jobs:
           path: artifacts/
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish GitHub Release
+        run: |
+          version="$(grep '^VERSION_NAME=' composeApp/Configuration/DesktopVersion.properties 2>/dev/null | cut -d'=' -f2 || echo 'latest')"
+          tag="v${version}"
+          title="Nuvio Desktop ${version} (Omarchy Build)"
+
+          echo "Publishing GitHub release for tag ${tag}..."
+          mapfile -t files < <(find artifacts/ -type f | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No artifact files found to publish."
+            exit 0
+          fi
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists. Uploading updated assets..."
+            gh release upload "${tag}" "${files[@]}" --clobber
+          else
+            echo "Creating new release ${tag}..."
+            gh release create "${tag}" "${files[@]}" \
+              --title "${title}" \
+              --notes "Automated package release for Nuvio Desktop with Omarchy fixes." \
+              --target "${{ github.sha }}"
+          fi
 
       - name: Prune Older Artifacts (Retain max 2)
         if: always()
